@@ -9,31 +9,68 @@
 		<link rel="stylesheet" href="dist/reset.css">
 		<link rel="stylesheet" href="dist/reveal.css">
 		<link rel="stylesheet" href="dist/theme/black.css">
+		<link rel="stylesheet" href="plugin/python/ace.css">
 
 		<!-- Theme used for syntax highlighted code -->
-		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+		<!-- <link rel="stylesheet" href="plugin/highlight/monokai.css"> -->
+		<!-- <style type="text/css">
+			.container{
+				display: flex;
+			}
+			.col{
+				flex: 1;
+			}
+		</style> -->
 	</head>
 	<body>
 		<div class="reveal">
 			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
+				<section data-auto-animate>
+					<h2 data-id="code-title">Pretty Code</h2>
+					<div class="twocolumn">
+					<div class="col">
+					<pre data-id="code-animation">
+						<code class="python" data-trim data-wrap id="task1">
+						for i in range(10):
+						    print(i)</code></pre>
+						<button class="run-python" data-input="task1" data-output="out1" disabled>Run
+<!-- <data data-post>
+x = [1, 2, 3, 6, 12]
+print(funktion(x))
+</data> -->
+
+						</button>
+					</div>
+					<div class="col">
+						<pre style="overflow-x: scroll;"><code class="stdout" id="out1">
+Ausgabe:
+
+</code>
+						</pre>
+					</div>
+				</div>
+				</section>
+				<section>
+					<h2>Damn</h2>
+				</section>
 			</div>
 		</div>
 
 		<script src="dist/reveal.js"></script>
 		<script src="plugin/notes/notes.js"></script>
 		<script src="plugin/markdown/markdown.js"></script>
+		<script src="plugin/python/python.js"></script>
 		<script src="plugin/highlight/highlight.js"></script>
 		<script>
 			// More info about initialization & config:
 			// - https://revealjs.com/initialization/
 			// - https://revealjs.com/config/
+			
 			Reveal.initialize({
 				hash: true,
 
 				// Learn about plugins: https://revealjs.com/plugins/
-				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+				plugins: [ RevealMarkdown, RevealNotes, RevealPython ]
 			});
 		</script>
 	</body>
