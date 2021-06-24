@@ -1,0 +1,26 @@
+.ace_editor, .ace_editor div {
+    font-variant-ligatures: none !important; 
+    font-size: 14pt !important;
+    font-family : var(--r-code-font) !important;
+    font-weight: 400 !important; 
+    letter-spacing: 0 !important; 
+}
+.stdout{
+    padding: 0!important;
+    font-size: 14pt!important;
+    line-height: 1.2;
+    font-family: var(--r-code-font)!important;
+}
+.run-python data{
+    display: none;
+}
+.twocolumn {
+   display: grid;
+   grid-template-columns: 1fr 1fr;
+   grid-gap: 10px;
+   text-align: left;
+}
+.code-wrapper
+{
+
+}
