@@ -119,28 +119,40 @@ def _register_call_hooks(m, push, pop, animate=True, nono_list=None):
         def __init__(self):
             self.calls = set()
             self.func_defs = set()
+            self.async_func_defs = set()
         def visit_Call(self, node):
             self.generic_visit(node)
             self.calls.add(node.func.id)
         def visit_FunctionDef(self, node):
             self.generic_visit(node)
             self.func_defs.add(node.name)
+        def visit_AsyncFunctionDef(self, node):
+            self.generic_visit(node)
+            self.async_func_defs.add(node.name)
 
     class ReplaceFunctionCalls(ast.NodeTransformer):
-        def __init__(self, calls):
+        def __init__(self, calls, func_defs, async_func_defs):
             super().__init__()
             self.calls = calls
+            self.func_defs = func_defs
+            self.async_func_defs = async_func_defs
 
         def visit_Call(self, node):
             self.generic_visit(node)
             if isinstance(node.func, ast.Name) and node.func.id in self.calls:
                 # Return a call to a wrapped function that calls stack.push hook, then call the function, then call stack.pop hook
-                return ast.Await(
-                        value=ast.Call(
-                            func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
-                            args=node.args,
-                            keywords=node.keywords
-                    ))
+                if node.func.id not in self.async_func_defs:
+                    return ast.Await(
+                            value=ast.Call(
+                                func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
+                                args=node.args,
+                                keywords=node.keywords
+                        ))
+                return ast.Call(
+                                func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
+                                args=node.args,
+                                keywords=node.keywords
+                        )
             return node
 
     _WRAPPED_CALL="""
@@ -153,8 +165,9 @@ async def _giftwrapped_{name}(*args, **kwargs):
     return ret
     """
     class WrapFunctionDefs(ast.NodeTransformer):
-        def __init__(self, func_defs):
+        def __init__(self, func_defs, async_func_defs):
             self.func_defs = func_defs
+            self.async_func_defs = async_func_defs
         def visit_FunctionDef(self, node):
             self.generic_visit(node)
             if node.name in self.func_defs:
@@ -177,6 +190,21 @@ async def _giftwrapped_{name}(*args, **kwargs):
                 ]
                 return new_node
             return node
+        def visit_AsyncFunctionDef(self, node):
+            self.generic_visit(node)
+            if node.name in self.async_func_defs:
+                new_node = _zeroline(ast.parse(_WRAPPED_CALL.format(
+                    name=node.name,
+                    push=push.__name__,
+                    pop=pop.__name__,
+                    animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
+                    )
+                )).body[0]
+                new_node.body[0:0] = [
+                    node
+                ]
+                return new_node
+            return node
     def _zeroline(m):
         for n in ast.walk(m):
             n.lineno = 0
@@ -193,13 +221,16 @@ async def _giftwrapped_{name}(*args, **kwargs):
     # we exclude the ones from the no-no-list
     t.calls -= nono_list
     print("Found the following calls:", t.calls, file=sys.stderr)
+    print("Found the following function definitions:", t.func_defs, file=sys.stderr)
+    print("Found the following async function definitions:", t.async_func_defs, file=sys.stderr)
 
     # Then we replace all function calls with function calls to the wrapped functions
-    m = ReplaceFunctionCalls(t.calls).visit(m)
+    m = ReplaceFunctionCalls(t.calls, t.func_defs, t.async_func_defs).visit(m)
+    print(ast.dump(m), file=sys.stderr)
     # For all "global" functions that need wrapping, we wrapped them directly in the main module
     for call in t.calls:
         #wrap global functions globally
-        if call not in t.func_defs:
+        if call not in t.func_defs and call not in t.async_func_defs:
             print(_WRAPPED_CALL.format(
                     name=call,
                     push=push.__name__,
@@ -212,8 +243,10 @@ async def _giftwrapped_{name}(*args, **kwargs):
                     animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
                     )
                 )).body
+    print("now wrapping function definitions", file=sys.stderr)
+
     # Our own functions get wrapped where they are defined.
-    m = WrapFunctionDefs(t.func_defs).visit(m)
+    m = WrapFunctionDefs(t.func_defs, t.async_func_defs).visit(m)
     return m
 
 test = """
