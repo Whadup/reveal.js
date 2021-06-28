@@ -31,8 +31,15 @@
 					<div class="col">
 					<pre data-id="code-animation">
 						<code class="python" data-trim data-wrap id="task1">
-						for i in range(10):
-						    print(i)</code></pre>
+						def x(i):
+						    if i>0:
+						        print(i)
+						        y(i-1)
+						def y(i):
+						    if i>0:
+						        print(i)
+						        x(i-1)
+						x(4)</code></pre>
 						<button class="run-python" data-input="task1" data-output="out1" disabled>Run
 <!-- <data data-post>
 x = [1, 2, 3, 6, 12]

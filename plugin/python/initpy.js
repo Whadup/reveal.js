@@ -36,6 +36,7 @@ class Tee(object):
     def write(self, data):
         from time import sleep
         """Write to both the output streams and flush"""
+        #TODO: we should use inner spans here.
         self.dom.innerText += data
         sleep(1)
         #self.stdstream.write(data)
@@ -111,11 +112,21 @@ print(exec(compile(ast.fix_missing_locations(test), filename="<ast>", mode="exec
 
 
 
-def _register_call_hooks(m, push, pop, animate=False, nono_list=None):
-    if nono_list is None:
-        nono_list = ["range", "list", "print", "Tee"]
-    nono_list = set(nono_list)
-    class CallHook(ast.NodeTransformer):
+def _register_call_hooks(m, push, pop, animate=True, nono_list=None):
+
+    class FindCalls(ast.NodeVisitor):
+        """Finds function calls in m"""
+        def __init__(self):
+            self.calls = set()
+            self.func_defs = set()
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            self.calls.add(node.func.id)
+        def visit_FunctionDef(self, node):
+            self.generic_visit(node)
+            self.func_defs.add(node.name)
+
+    class ReplaceFunctionCalls(ast.NodeTransformer):
         def __init__(self, calls):
             super().__init__()
             self.calls = calls
@@ -126,27 +137,17 @@ def _register_call_hooks(m, push, pop, animate=False, nono_list=None):
                 # Return a call to a wrapped function that calls stack.push hook, then call the function, then call stack.pop hook
                 return ast.Await(
                         value=ast.Call(
-                    func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
-                    args=node.args,
-                    keywords=node.keywords
-                ))
+                            func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
+                            args=node.args,
+                            keywords=node.keywords
+                    ))
             return node
 
-    class FindCalls(ast.NodeVisitor):
-        def __init__(self):
-            self.calls = set()
-            self.func_defs = set()
-        def visit_Call(self, node):
-            self.generic_visit(node)
-            self.calls.add(node.func.id)
-        def visit_FunctionDef(self, node):
-            self.generic_visit(node)
-            self.func_defs.add(node.name)
     _WRAPPED_CALL="""
 async def _giftwrapped_{name}(*args, **kwargs):
     {push}("{name}")
     {animate}
-    ret = {name}(*args, **kwargs)
+    ret = await {name}(*args, **kwargs)
     {pop}("{name}")
     {animate}
     return ret
@@ -164,7 +165,16 @@ async def _giftwrapped_{name}(*args, **kwargs):
                     animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
                     )
                 )).body[0]
-                new_node.body[0:0] = [node]
+                new_node.body[0:0] = [
+                    ast.AsyncFunctionDef(
+                        node.name,
+                        node.args,
+                        node.body,
+                        node.decorator_list,
+                        node.returns,
+                        node.type_comment
+                    )
+                ]
                 return new_node
             return node
     def _zeroline(m):
@@ -173,16 +183,20 @@ async def _giftwrapped_{name}(*args, **kwargs):
             n.col_offset = 0
         return m
 
+    if nono_list is None:
+        nono_list = ["range", "list", "print", "Tee"]
+    nono_list = set(nono_list)
 
-
+    #First we find all function calls that we want to animate
     t = FindCalls()
     t.visit(m)
-    print(t.calls, file=sys.stderr)
-    
+    # we exclude the ones from the no-no-list
     t.calls -= nono_list
+    print("Found the following calls:", t.calls, file=sys.stderr)
 
-    m = CallHook(t.calls).visit(m)
-    # I do not like this special treatment.
+    # Then we replace all function calls with function calls to the wrapped functions
+    m = ReplaceFunctionCalls(t.calls).visit(m)
+    # For all "global" functions that need wrapping, we wrapped them directly in the main module
     for call in t.calls:
         #wrap global functions globally
         if call not in t.func_defs:
@@ -198,31 +212,38 @@ async def _giftwrapped_{name}(*args, **kwargs):
                     animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
                     )
                 )).body
+    # Our own functions get wrapped where they are defined.
     m = WrapFunctionDefs(t.func_defs).visit(m)
     return m
 
-
 test = """
+def x(y):
+    return y ** 2
+x(5)
+__TEST__ = x
+"""
+
+test2 = """
 def x(y):
     def _x(y):
         return y ** 2
     _x(y)
     print("hallo")
     return _x(y)
-__TEST__ = x(4)
+__TEST__ = x
 """
 
 print("STACK CALLBACK TEST")
 test = _register_call_hooks(ast.parse(test), print, print)
 print(ast.dump(test))
-print(exec(compile(ast.fix_missing_locations(test), filename="<ast>", mode="exec")), locals()["__TEST__"])
+#print(exec(compile(ast.fix_missing_locations(test), filename="<ast>", mode="exec")), locals()["__TEST__"])
 
 def process_code(code, wrap=True, animate_prints=False, animate_assignments=False, assignment_callback=None, animate_lines=False, stack_callback=(print, print), lines_callback=None):
     m = ast.parse(code)
     if stack_callback is not None:
         push_callback, pop_callback = stack_callback
         m = _register_call_hooks(m, push_callback, pop_callback)
-    m = _make_async(m)
+    # m = _make_async(m)
     if wrap:
         body = m.body
         m.body = [
