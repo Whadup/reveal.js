@@ -69,7 +69,7 @@ const Plugin = {
 					var output = document.getElementById(button.dataset.output);
 					console.log(output)
 					var data = button.getElementsByTagName("data");
-					
+					//TODO: move pre to process_code
 					var pre = `
 from gui import output
 sys.stdout = Tee(sys.stdout, output)`;

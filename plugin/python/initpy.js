@@ -54,10 +54,177 @@ async def _sleep(duration=1):
 _SLEEP = ast.parse(r"_sleep(duration=0.5)")
 print(ast.dump(_SLEEP))
 
-def process_code(code, wrap=True, animate_prints=False, animate_assignments=False, assignment_callback=None, animate_lines=False, stack_callback=None, lines_callback=None):
+__ANIMATION_PAUSE__ = 1
+
+def _make_async(m):
+    class MakeAsync(ast.NodeTransformer):
+        """Find all function definitions and make them async"""
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.func_defs = set()
+        def visit_FunctionDef(self, node):
+            self.generic_visit(node)
+            self.func_defs.add(node.name)
+            return ast.AsyncFunctionDef(
+                node.name,
+                node.args,
+                node.body,
+                node.decorator_list,
+                node.returns,
+                node.type_comment
+            )
+
+    class CallAsync(ast.NodeTransformer):
+        """Find all function calls to freshly-converted async functions with names in func_defs and await the results"""
+        def __init__(self, func_defs, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.func_defs = func_defs
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if isinstance(node.func, ast.Name):
+                if node.func.id in self.func_defs:
+                    return ast.Await(
+                        value=node)
+            else:
+                print(ast.dump(node), file=sys.stderr)
+                return node
+    t = MakeAsync()
+    m = t.visit(m)
+    t = CallAsync(t.func_defs)
+    m = t.visit(m)
+    return m
+
+test = """
+def x(y):
+    def _x(y):
+        return y ** 2
+    _x(y)
+    _x(y)
+    _x(y)
+    return _x(y)
+"""
+
+print("MAKE ASYNC TEST")
+test = _make_async(ast.parse(test))
+print(ast.dump(test))
+print(exec(compile(ast.fix_missing_locations(test), filename="<ast>", mode="exec")))
+
+
+
+def _register_call_hooks(m, push, pop, animate=False, nono_list=None):
+    if nono_list is None:
+        nono_list = ["range", "list", "print", "Tee"]
+    nono_list = set(nono_list)
+    class CallHook(ast.NodeTransformer):
+        def __init__(self, calls):
+            super().__init__()
+            self.calls = calls
+
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            if isinstance(node.func, ast.Name) and node.func.id in self.calls:
+                # Return a call to a wrapped function that calls stack.push hook, then call the function, then call stack.pop hook
+                return ast.Await(
+                        value=ast.Call(
+                    func=ast.Name(f"_giftwrapped_{node.func.id}", ctx=node.func.ctx),
+                    args=node.args,
+                    keywords=node.keywords
+                ))
+            return node
+
+    class FindCalls(ast.NodeVisitor):
+        def __init__(self):
+            self.calls = set()
+            self.func_defs = set()
+        def visit_Call(self, node):
+            self.generic_visit(node)
+            self.calls.add(node.func.id)
+        def visit_FunctionDef(self, node):
+            self.generic_visit(node)
+            self.func_defs.add(node.name)
+    _WRAPPED_CALL="""
+async def _giftwrapped_{name}(*args, **kwargs):
+    {push}("{name}")
+    {animate}
+    ret = {name}(*args, **kwargs)
+    {pop}("{name}")
+    {animate}
+    return ret
+    """
+    class WrapFunctionDefs(ast.NodeTransformer):
+        def __init__(self, func_defs):
+            self.func_defs = func_defs
+        def visit_FunctionDef(self, node):
+            self.generic_visit(node)
+            if node.name in self.func_defs:
+                new_node = _zeroline(ast.parse(_WRAPPED_CALL.format(
+                    name=node.name,
+                    push=push.__name__,
+                    pop=pop.__name__,
+                    animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
+                    )
+                )).body[0]
+                new_node.body[0:0] = [node]
+                return new_node
+            return node
+    def _zeroline(m):
+        for n in ast.walk(m):
+            n.lineno = 0
+            n.col_offset = 0
+        return m
+
+
+
+    t = FindCalls()
+    t.visit(m)
+    print(t.calls, file=sys.stderr)
+    
+    t.calls -= nono_list
+
+    m = CallHook(t.calls).visit(m)
+    # I do not like this special treatment.
+    for call in t.calls:
+        #wrap global functions globally
+        if call not in t.func_defs:
+            print(_WRAPPED_CALL.format(
+                    name=call,
+                    push=push.__name__,
+                    pop=pop.__name__
+                    ), file=sys.stderr)
+            m.body[0:0] = _zeroline(ast.parse(_WRAPPED_CALL.format(
+                    name=call,
+                    push=push.__name__,
+                    pop=pop.__name__,
+                    animate="await asyncio.sleep(__ANIMATION_PAUSE__)" if animate else "",
+                    )
+                )).body
+    m = WrapFunctionDefs(t.func_defs).visit(m)
+    return m
+
+
+test = """
+def x(y):
+    def _x(y):
+        return y ** 2
+    _x(y)
+    print("hallo")
+    return _x(y)
+__TEST__ = x(4)
+"""
+
+print("STACK CALLBACK TEST")
+test = _register_call_hooks(ast.parse(test), print, print)
+print(ast.dump(test))
+print(exec(compile(ast.fix_missing_locations(test), filename="<ast>", mode="exec")), locals()["__TEST__"])
+
+def process_code(code, wrap=True, animate_prints=False, animate_assignments=False, assignment_callback=None, animate_lines=False, stack_callback=(print, print), lines_callback=None):
     m = ast.parse(code)
-    body = m.body
+    if stack_callback is not None:
+        push_callback, pop_callback = stack_callback
+        m = _register_call_hooks(m, push_callback, pop_callback)
+    m = _make_async(m)
     if wrap:
+        body = m.body
         m.body = [
             ast.AsyncFunctionDef(
                 name="___happy_wrapper___",
@@ -69,9 +236,11 @@ def process_code(code, wrap=True, animate_prints=False, animate_assignments=Fals
                     defaults=[]),
                 decorator_list=[],
                 body=body
+                #TODO: add imports and sysout fixing
             ),
         ]
     # do crazy stuff with m
+    print(ast.dump(m), file=sys.stderr)
     code = compile(ast.fix_missing_locations(m), filename="<ast>", mode="exec")
     exec(code)
     return locals()["___happy_wrapper___"]()
