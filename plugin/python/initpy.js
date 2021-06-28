@@ -55,7 +55,7 @@ async def _sleep(duration=1):
 _SLEEP = ast.parse(r"_sleep(duration=0.5)")
 print(ast.dump(_SLEEP))
 
-__ANIMATION_PAUSE__ = 1
+__ANIMATION_PAUSE__ = 0.5
 
 def _make_async(m):
     class MakeAsync(ast.NodeTransformer):
@@ -157,7 +157,7 @@ def _register_call_hooks(m, push, pop, animate=True, nono_list=None):
 
     _WRAPPED_CALL="""
 async def _giftwrapped_{name}(*args, **kwargs):
-    {push}("{name}")
+    {push}("{name}", args, kwargs)
     {animate}
     ret = await {name}(*args, **kwargs)
     {pop}("{name}")
@@ -274,9 +274,12 @@ print(ast.dump(test))
 def process_code(code, wrap=True, animate_prints=False, animate_assignments=False, assignment_callback=None, animate_lines=False, stack_callback=(print, print), lines_callback=None):
     m = ast.parse(code)
     if stack_callback is not None:
+        # When we animate the stack we need to convert all functions to async functions and wrap them in async wrappers that report the push and pop operations onto the stack
         push_callback, pop_callback = stack_callback
         m = _register_call_hooks(m, push_callback, pop_callback)
-    # m = _make_async(m)
+    else:
+        # Anyways its a good idea to make everything async such that we can animate...
+        m = _make_async(m)
     if wrap:
         body = m.body
         m.body = [
