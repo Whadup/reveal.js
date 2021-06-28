@@ -26,3 +26,10 @@ Want to create your presentation using a visual editor? Try the official reveal.
 MIT licensed
 
 Copyright (C) 2011-2021 Hakim El Hattab, https://hakim.se
+
+## ToDo
+
+- [ ] Handle Errors (Syntax / Runtime) and provide appropriate feedback to the user 
+- [ ] Fix example layout. Long prints break the layout...
+- [ ] Look into ways to abort execution (sending keyboard interrupts?)
+- [ ] Move plugin to a separate repository and figure out how to use it there..
